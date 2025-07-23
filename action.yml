@@ -1,9 +1,9 @@
 name: 'Automatic Version Bumper'
-description: 'Automatically bumps version and creates releases based on PR title conventions'
+description: 'Automatically bumps version and creates a tag based on PR title conventions'
 
 inputs:
   token:
-    description: 'GitHub token for creating releases'
+    description: 'GitHub token for pushing tags'
     required: true
   initial_version:
     description: 'Initial version from secrets'
@@ -48,38 +48,16 @@ runs:
       run: |
         CURRENT_VERSION="${{ inputs.initial_version }}"
         IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
-        
+
         case $BUMP in
           major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
           minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
           patch) NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
           none) NEW_VERSION="${CURRENT_VERSION}" ;;
         esac
-        
+
         echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
         echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
-
-    - name: Extract Release Notes
-      shell: bash
-      id: release-notes
-      run: |
-        TAG="${{ env.NEW_VERSION }}"  # Version without 'v' prefix
-
-        # Extract release notes from CHANGELOG.md
-        RELEASE_NOTES=$(awk "/^## v${TAG}/ {flag=1; next} /^## / {flag=0} flag" CHANGELOG.md)
-
-        if [ -z "$RELEASE_NOTES" ]; then
-          echo "ERROR: No release notes found for ${TAG}" >&2
-          exit 1
-        fi
-
-        # Store properly formatted release notes
-        echo -e "## v${TAG}\n\n$RELEASE_NOTES" > RELEASE_NOTES.txt
-
-        # Save release notes to an environment variable
-        echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-        echo -e "## v${TAG}\n\n$RELEASE_NOTES" >> $GITHUB_ENV
-        echo "EOF" >> $GITHUB_ENV
 
     - name: Commit and push tag
       shell: bash
@@ -88,23 +66,8 @@ runs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          TAG="${{ env.NEW_VERSION }}"  # Use version number only, no 'v' prefix
+          TAG="${{ env.NEW_VERSION }}"
 
-          # Create and push the tag
-          git tag -a "$TAG" -F RELEASE_NOTES.txt
+          git tag "$TAG"
           git push origin "$TAG"
         fi
-
-    - name: Create GitHub Release
-      shell: bash
-      run: |
-        if [ "$BUMP" != "none" ]; then
-          gh release create "${{ env.NEW_VERSION }}" \
-            --repo "${{ github.repository }}" \
-            --title "Release ${{ env.NEW_VERSION }}" \
-            --notes-file RELEASE_NOTES.txt \
-            --target "${{ github.sha }}" \
-            --verify-tag
-        fi
-      env:
-        GH_TOKEN: ${{ inputs.token }}
